@@ -1,23 +1,20 @@
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+import warnings
+from typing import Any, Dict, Optional, Type, Union
 
 import gym
 import numpy as np
 import torch as th
 from gym import spaces
-from torch.nn import functional as F
-
-from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
-
-from stable_baselines3.common import logger
-from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.buffers import RolloutBuffer
+from stable_baselines3.common.buffers import DictRolloutBuffer, RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
-from stable_baselines3.common.utils import safe_mean
+from stable_baselines3.common.utils import get_schedule_fn, safe_mean
 from stable_baselines3.common.vec_env import VecEnv
-from stable_baselines3.common.utils import explained_variance, get_schedule_fn
+from torch.nn import functional
+
 
 class ModularAlgorithm(OnPolicyAlgorithm):
     """
@@ -49,11 +46,9 @@ class ModularAlgorithm(OnPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
-        
         # my additional arguments
-        marginal_reg_coef : float = 0.0,
+        marginal_reg_coef: float = 0.0,
     ):
-
         super(ModularAlgorithm, self).__init__(
             policy,
             env,
@@ -80,7 +75,7 @@ class ModularAlgorithm(OnPolicyAlgorithm):
                 spaces.MultiBinary,
             ),
         )
-        
+
         self.marginal_reg_coef = marginal_reg_coef
 
         # Sanity check, otherwise it will lead to noisy gradient and NaN
@@ -117,7 +112,6 @@ class ModularAlgorithm(OnPolicyAlgorithm):
             self._setup_model()
 
     def _setup_model(self) -> None:
-        
         # OnPolicyAlgorithm's _setup_model
         self._setup_lr_schedule()
         self.set_random_seed(self.seed)
@@ -127,45 +121,39 @@ class ModularAlgorithm(OnPolicyAlgorithm):
             self.action_space,
             self.lr_schedule,
             use_sde=self.use_sde,
-            **self.policy_kwargs  # pytype:disable=not-instantiable
+            **self.policy_kwargs,  # pytype:disable=not-instantiable
         )
         self.policy = self.policy.to(self.device)
-        
+
         buffer_cls = DictRolloutBuffer if isinstance(self.observation_space, gym.spaces.Dict) else RolloutBuffer
 
-        self.rollout_buffer = [buffer_cls(
-            self.n_steps,
-            self.observation_space,
-            self.action_space,
-            self.device,
-            gamma=self.gamma,
-            gae_lambda=self.gae_lambda,
-            n_envs=self.n_envs,
-        ) for _ in range(self.policy.num_partners)]
-        
+        self.rollout_buffer = [
+            buffer_cls(
+                self.n_steps,
+                self.observation_space,
+                self.action_space,
+                self.device,
+                gamma=self.gamma,
+                gae_lambda=self.gae_lambda,
+                n_envs=self.n_envs,
+            )
+            for _ in range(self.policy.num_partners)
+        ]
+
         # PPO's _setup_model
         # Initialize schedules for policy/value clipping
         self.clip_range = get_schedule_fn(self.clip_range)
         if self.clip_range_vf is not None:
             if isinstance(self.clip_range_vf, (float, int)):
-                assert self.clip_range_vf > 0, "`clip_range_vf` must be positive, " "pass `None` to deactivate vf clipping"
+                assert self.clip_range_vf > 0, (
+                    "`clip_range_vf` must be positive, " "pass `None` to deactivate vf clipping"
+                )
 
             self.clip_range_vf = get_schedule_fn(self.clip_range_vf)
-        
+
     def collect_rollouts(
         self, env: VecEnv, callback: BaseCallback, rollout_buffer: RolloutBuffer, n_rollout_steps: int, partner_idx: int
     ) -> bool:
-        """
-        Collect rollouts using the current policy and fill a `RolloutBuffer`.
-
-        :param env: (VecEnv) The training environment
-        :param callback: (BaseCallback) Callback that will be called at each step
-            (and at the beginning and end of the rollout)
-        :param rollout_buffer: (RolloutBuffer) Buffer to fill with rollouts
-        :param n_steps: (int) Number of experiences to collect per environment
-        :return: (bool) True if function returned with at least `n_rollout_steps`
-            collected, False if callback terminated rollout prematurely.
-        """
         assert self._last_obs is not None, "No previous observation was provided"
         n_steps = 0
         rollout_buffer.reset()
@@ -184,7 +172,7 @@ class ModularAlgorithm(OnPolicyAlgorithm):
             with th.no_grad():
                 # Convert to pytorch tensor
                 obs_tensor = th.as_tensor(self._last_obs).to(self.device)
-                #actions, values, log_probs = self.policy.forward(obs_tensor)
+
                 actions, values, log_probs = self.policy.forward(obs_tensor, partner_idx=partner_idx)
             actions = actions.cpu().numpy()
 
@@ -216,8 +204,7 @@ class ModularAlgorithm(OnPolicyAlgorithm):
         callback.on_rollout_end()
 
         return True
-    
-    
+
     def train(self) -> None:
         """
         Update policy using the currently gathered
@@ -253,8 +240,9 @@ class ModularAlgorithm(OnPolicyAlgorithm):
                     if self.use_sde:
                         self.policy.reset_noise(self.batch_size)
 
-                    #values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
-                    values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions, partner_idx=partner_idx) 
+                    values, log_prob, entropy = self.policy.evaluate_actions(
+                        rollout_data.observations, actions, partner_idx=partner_idx
+                    )
                     values = values.flatten()
                     # Normalize advantage
                     advantages = rollout_data.advantages
@@ -283,15 +271,12 @@ class ModularAlgorithm(OnPolicyAlgorithm):
                             values - rollout_data.old_values, -clip_range_vf, clip_range_vf
                         )
                     # Value loss using the TD(gae_lambda) target
-                    value_loss = F.mse_loss(rollout_data.returns, values_pred)
+                    value_loss = functional.mse_loss(rollout_data.returns, values_pred)
                     value_losses.append(value_loss.item())
 
                     # Entropy loss favor exploration
-                    if entropy is None:
-                        # Approximate entropy when no analytical form
-                        entropy_loss = log_prob.mean()
-                    else:
-                        entropy_loss = -th.mean(entropy)
+
+                    entropy_loss = log_prob.mean() if entropy is None else -th.mean(entropy)
 
                     entropy_losses.append(entropy_loss.item())
 
@@ -303,19 +288,35 @@ class ModularAlgorithm(OnPolicyAlgorithm):
                     # dist.sample() returns a tensor of shape (self.batch_size)
 
                     # careful: must extract torch distribution object from stable_baseline Distribution object, otherwise old references get overwritten
-                    main_logits, partner_logits = zip( *[self.policy.get_action_logits_from_obs(rollout_data.observations, partner_idx=idx) for idx in range(self.policy.num_partners)] )
-                    main_logits = th.stack([logits for logits in main_logits]) # (num_partners, self.batch_size, self.action_space)
-                    partner_logits = th.stack([logits for logits in partner_logits]) # (num_partners, self.batch_size, self.action_space)
+                    main_logits, partner_logits = zip(
+                        *[
+                            self.policy.get_action_logits_from_obs(rollout_data.observations, partner_idx=idx)
+                            for idx in range(self.policy.num_partners)
+                        ]
+                    )
+                    main_logits = th.stack(
+                        list(main_logits)  # it was [logits for logits in main_logits]
+                    )  # (num_partners, self.batch_size, self.action_space)
+                    partner_logits = th.stack(
+                        list(partner_logits)  # it was [logits for logits in partner_logits]
+                    )  # (num_partners, self.batch_size, self.action_space)
                     composed_logits = main_logits + partner_logits
 
                     # Regularize main prob to be the marginals
                     # Wasserstein metric with unitary distances (for categorical actions)
-                    main_probs = th.mean( th.exp(main_logits - main_logits.logsumexp(dim=-1, keepdim=True)), dim=0 )
-                    composed_probs = th.mean( th.exp(composed_logits - composed_logits.logsumexp(dim=-1, keepdim=True)), dim=0 )
-                    marginal_regularization_loss = th.mean(th.sum( th.abs(main_probs - composed_probs), dim=1))
+                    main_probs = th.mean(th.exp(main_logits - main_logits.logsumexp(dim=-1, keepdim=True)), dim=0)
+                    composed_probs = th.mean(
+                        th.exp(composed_logits - composed_logits.logsumexp(dim=-1, keepdim=True)), dim=0
+                    )
+                    marginal_regularization_loss = th.mean(th.sum(th.abs(main_probs - composed_probs), dim=1))
                     ###########
 
-                    loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss + self.marginal_reg_coef * marginal_regularization_loss
+                    loss = (
+                        policy_loss
+                        + self.ent_coef * entropy_loss
+                        + self.vf_coef * value_loss
+                        + self.marginal_reg_coef * marginal_regularization_loss
+                    )
 
                     # Optimization step
                     self.policy.optimizer.zero_grad()
@@ -328,27 +329,14 @@ class ModularAlgorithm(OnPolicyAlgorithm):
                 all_kl_divs.append(np.mean(approx_kl_divs))
 
                 if self.target_kl is not None and np.mean(approx_kl_divs) > 1.5 * self.target_kl:
-                    print(f"Early stopping at step {epoch} due to reaching max kl: {np.mean(approx_kl_divs):.2f}")
                     break
 
         self._n_updates += self.n_epochs
-        # explained_var = explained_variance(self.rollout_buffer.returns.flatten(), self.rollout_buffer.values.flatten())
-        
+
         # Logs
         self.logger.record("train/entropy_loss", np.mean(entropy_losses))
         self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
         self.logger.record("train/value_loss", np.mean(value_losses))
-        # self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
-        # self.logger.record("train/clip_fraction", np.mean(clip_fractions))
-        # self.logger.record("train/loss", loss.item())
-        # self.logger.record("train/explained_variance", explained_var)
-        # if hasattr(self.policy, "log_std"):
-        #     self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
-
-        # self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
-        # self.logger.record("train/clip_range", clip_range)
-        # if self.clip_range_vf is not None:
-        #     self.logger.record("train/clip_range_vf", clip_range_vf)
 
     def learn(
         self,
@@ -365,19 +353,31 @@ class ModularAlgorithm(OnPolicyAlgorithm):
         iteration = 0
 
         total_timesteps, callback = self._setup_learn(
-            total_timesteps, eval_env, callback, eval_freq, n_eval_episodes, eval_log_path, reset_num_timesteps, tb_log_name
+            total_timesteps,
+            eval_env,
+            callback,
+            eval_freq,
+            n_eval_episodes,
+            eval_log_path,
+            reset_num_timesteps,
+            tb_log_name,
         )
 
         callback.on_training_start(locals(), globals())
 
         while self.num_timesteps < total_timesteps:
-
             for partner_idx in range(self.policy.num_partners):
-                try:    self.env.envs[0].set_partnerid(partner_idx)
-                except: 
-                    print("unable to switch")
-                    pass
-                continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer[partner_idx], n_rollout_steps=self.n_steps, partner_idx=partner_idx)
+                try:
+                    self.env.envs[0].set_partnerid(partner_idx)
+                except Exception as e:
+                    raise (e)
+                continue_training = self.collect_rollouts(
+                    self.env,
+                    callback,
+                    self.rollout_buffer[partner_idx],
+                    n_rollout_steps=self.n_steps,
+                    partner_idx=partner_idx,
+                )
 
             if continue_training is False:
                 break
@@ -390,8 +390,12 @@ class ModularAlgorithm(OnPolicyAlgorithm):
                 fps = int(self.num_timesteps / (time.time() - self.start_time))
                 self.logger.record("time/iterations", iteration, exclude="tensorboard")
                 if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
-                    self.logger.record("rollout/ep_rew_mean", safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
-                    self.logger.record("rollout/ep_len_mean", safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
+                    self.logger.record(
+                        "rollout/ep_rew_mean", safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer])
+                    )
+                    self.logger.record(
+                        "rollout/ep_len_mean", safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer])
+                    )
                 self.logger.record("time/fps", fps)
                 self.logger.record("time/time_elapsed", int(time.time() - self.start_time), exclude="tensorboard")
                 self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")

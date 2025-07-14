@@ -1,6 +1,6 @@
 import dataclasses
 from abc import ABC, abstractmethod
-from typing import Dict, Mapping, Sequence, Union, TypeVar, overload
+from typing import Dict, Mapping, Sequence, TypeVar, Union, overload
 
 import numpy as np
 import torch as th
@@ -9,25 +9,14 @@ from torch.utils.data._utils.collate import default_collate
 
 from .util import get_space_size
 
-
 T = TypeVar("T")
 
 
 def transitions_collate_fn(
     batch: Sequence[Mapping[str, np.ndarray]],
 ) -> Dict[str, Union[np.ndarray, th.Tensor]]:
-    """
-    This function is from HumanCompatibleAI's imitation repo:
-    https://github.com/HumanCompatibleAI/imitation/blob/master/src/imitation/
-    data/types.py
-
-    Custom `torch.utils.data.DataLoader` collate_fn for `TransitionsMinimal`.
-    Use this as the `collate_fn` argument to `DataLoader` if using an instance
-    of `TransitionsMinimal` as the `dataset` argument.
-    """
-    batch_no_infos = [
-        {k: v for k, v in sample.items()} for sample in batch
-    ]
+    # it was {k: v for k, v in sample.items()} instead of dict
+    batch_no_infos = [dict(sample.items()) for sample in batch]
 
     result = default_collate(batch_no_infos)
     assert isinstance(result, dict)
@@ -35,19 +24,8 @@ def transitions_collate_fn(
 
 
 def dataclass_quick_asdict(dataclass_instance) -> dict:
-    """
-    This function is from HumanCompatibleAI's imitation repo:
-    https://github.com/HumanCompatibleAI/imitation/blob/master/src/imitation/
-    data/types.py
-
-    Extract dataclass to items using `dataclasses.fields` + dict comprehension.
-    This is a quick alternative to `dataclasses.asdict`, which expensively and
-    undocumentedly deep-copies every numpy array value.
-    See https://stackoverflow.com/a/52229565/1091722.
-    """
     obj = dataclass_instance
-    d = {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
-    return d
+    return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -80,22 +58,15 @@ class TransitionsMinimal(th_data.Dataset):
     """Actions. Shape: (batch_size,) + action_shape."""
 
     def __len__(self):
-        """Returns number of transitions. Always positive."""
         return len(self.obs)
 
     def __post_init__(self):
-        """Performs input validation: check shapes & dtypes match docstring.
-        Also make array values read-only.
-        """
         for val in vars(self).values():
             if isinstance(val, np.ndarray):
                 val.setflags(write=False)
 
         if len(self.obs) != len(self.acts):
-            raise ValueError(
-                "obs and acts must have same number of timesteps: "
-                f"{len(self.obs)} != {len(self.acts)}"
-            )
+            raise ValueError("obs and acts must have same number of timesteps: " f"{len(self.obs)} != {len(self.acts)}")
 
     @overload
     def __getitem__(self: T, key: slice) -> T:
@@ -106,8 +77,6 @@ class TransitionsMinimal(th_data.Dataset):
         pass  # pragma: no cover
 
     def __getitem__(self, key):
-        """See TransitionsMinimal docstring for indexing and slicing semantics.
-        """
         d = dataclass_quick_asdict(self)
         d_item = {k: v[key] for k, v in d.items()}
 
@@ -115,17 +84,16 @@ class TransitionsMinimal(th_data.Dataset):
             # Return type is the same as this dataclass. Replace field value
             # with slices.
             return dataclasses.replace(self, **d_item)
-        else:
-            assert isinstance(key, int)
-            # Return type is a dictionary. Array values have no batch dimension
-            #
-            # Dictionary of np.ndarray values is a convenient
-            # torch.util.data.Dataset return type, as a
-            # torch.util.data.DataLoader taking in this `Dataset` as its first
-            # argument knows how to automatically concatenate several
-            # dictionaries together to make a single dictionary batch with
-            # `torch.Tensor` values.
-            return d_item
+        assert isinstance(key, int)
+        # Return type is a dictionary. Array values have no batch dimension
+        #
+        # Dictionary of np.ndarray values is a convenient
+        # torch.util.data.Dataset return type, as a
+        # torch.util.data.DataLoader taking in this `Dataset` as its first
+        # argument knows how to automatically concatenate several
+        # dictionaries together to make a single dictionary batch with
+        # `torch.Tensor` values.
+        return d_item
 
     def write_transition(self, file):
         full_list = np.concatenate((self.obs, self.acts), axis=1)
@@ -141,15 +109,15 @@ class TransitionsMinimal(th_data.Dataset):
 
 
 class MultiTransitions(ABC):
-    """ Base class for all classes that store multiple transitions """
+    """Base class for all classes that store multiple transitions"""
 
     @abstractmethod
     def get_ego_transitions(self) -> TransitionsMinimal:
-        """ Returns the ego's transitions """
+        pass
 
     @abstractmethod
     def get_alt_transitions(self) -> TransitionsMinimal:
-        """ Returns the partner's transitions """
+        pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -159,13 +127,11 @@ class TurnBasedTransitions(MultiTransitions):
     flags: np.ndarray
 
     def get_ego_transitions(self) -> TransitionsMinimal:
-        """ Returns the ego's transitions """
-        mask = (self.flags % 2 == 0)
+        mask = self.flags % 2 == 0
         return TransitionsMinimal(self.obs[mask], self.acts[mask])
 
     def get_alt_transitions(self) -> TransitionsMinimal:
-        """ Returns the partner's transitions """
-        mask = (self.flags % 2 == 1)
+        mask = self.flags % 2 == 1
         return TransitionsMinimal(self.obs[mask], self.acts[mask])
 
     def write_transition(self, file):
@@ -198,11 +164,9 @@ class SimultaneousTransitions(MultiTransitions):
     flags: np.ndarray
 
     def get_ego_transitions(self) -> TransitionsMinimal:
-        """ Returns the ego's transitions """
         return TransitionsMinimal(self.egoobs, self.egoacts)
 
     def get_alt_transitions(self) -> TransitionsMinimal:
-        """ Returns the partner's transitions """
         return TransitionsMinimal(self.altobs, self.altacts)
 
     def write_transition(self, file):
@@ -212,10 +176,7 @@ class SimultaneousTransitions(MultiTransitions):
         egoacts = np.reshape(self.egoacts, (len, -1))
         altobs = np.reshape(self.altobs, (len, -1))
         altacts = np.reshape(self.altacts, (len, -1))
-        full_list = np.concatenate(
-                (egoobs, egoacts, altobs, altacts, flags),
-                axis=1
-            )
+        full_list = np.concatenate((egoobs, egoacts, altobs, altacts, flags), axis=1)
         np.save(file, full_list)
 
     @classmethod
@@ -224,9 +185,9 @@ class SimultaneousTransitions(MultiTransitions):
         obs_size = get_space_size(obs_space)
         act_size = get_space_size(act_space)
         egoobs = full_list[:, :obs_size]
-        egoacts = full_list[:, obs_size:(obs_size + act_size)]
-        altobs = full_list[:, (obs_size + act_size):(2 * obs_size + act_size)]
-        altacts = full_list[:, (2*obs_size + act_size):-1]
+        egoacts = full_list[:, obs_size : (obs_size + act_size)]
+        altobs = full_list[:, (obs_size + act_size) : (2 * obs_size + act_size)]
+        altacts = full_list[:, (2 * obs_size + act_size) : -1]
         flags = full_list[:, -1]
 
         return SimultaneousTransitions(egoobs, egoacts, altobs, altacts, flags)

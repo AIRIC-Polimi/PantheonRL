@@ -7,20 +7,18 @@ master/src/imitation/algorithms/bc.py
 """
 
 import contextlib
-from typing import (Any, Callable, Dict, Iterable, Mapping,
-                    Optional, Tuple, Type, Union)
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Type, Union
 
 import gym
 import numpy as np
 import torch as th
 import torch.utils.data as th_data
-from torch.optim.optimizer import Optimizer
-from torch.optim.adam import Adam
 import tqdm.autonotebook as tqdm
 from stable_baselines3.common import policies, utils
+from torch.optim.adam import Adam
+from torch.optim.optimizer import Optimizer
 
-from pantheonrl.common.trajsaver import (TransitionsMinimal,
-                                              transitions_collate_fn)
+from pantheonrl.common.trajsaver import TransitionsMinimal, transitions_collate_fn
 from pantheonrl.common.util import FeedForward32Policy
 
 log = utils.configure_logger(verbose=0)  # change to 1 for debugging
@@ -35,14 +33,7 @@ def reconstruct_policy(
     policy_path: str,
     device: Union[th.device, str] = "auto",
 ) -> policies.BasePolicy:
-    """Reconstruct a saved policy.
-    Args:
-        policy_path: path where `.save_policy()` has been run.
-        device: device on which to load the policy.
-    Returns:
-        policy: policy with reloaded weights.
-    """
-    policy = th.load(policy_path, map_location=utils.get_device(device))
+    policy = th.load(policy_path, map_location=utils.get_device(device))  # nosec B614
     assert isinstance(policy, policies.BasePolicy)
     return policy
 
@@ -58,9 +49,6 @@ class ConstantLRSchedule:
         self.lr = lr
 
     def __call__(self, _):
-        """
-        Returns the constant learning rate.
-        """
         return self.lr
 
 
@@ -73,22 +61,6 @@ class EpochOrBatchIteratorWithProgress:
         on_epoch_end: Optional[Callable[[], None]] = None,
         on_batch_end: Optional[Callable[[], None]] = None,
     ):
-        """
-        Wraps DataLoader so that all BC batches can be processed in a one
-        for-loop. Also uses `tqdm` to show progress in stdout.
-        Args:
-            data_loader: An iterable over data dicts, as used in `BC`.
-            n_epochs: The number of epochs to iterate through in one call to
-                __iter__. Exactly one of `n_epochs` and `n_batches` should be
-                provided.
-            n_batches: The number of batches to iterate through in one call to
-                __iter__. Exactly one of `n_epochs` and `n_batches` should be
-                provided.
-            on_epoch_end: A callback function without parameters to be called
-                at the end of every epoch.
-            on_batch_end: A callback function without parameters to be called
-                at the end of every batch.
-        """
         if n_epochs is not None and n_batches is None:
             self.use_epochs = True
         elif n_epochs is None and n_batches is not None:
@@ -105,9 +77,7 @@ class EpochOrBatchIteratorWithProgress:
         self.on_epoch_end = on_epoch_end
         self.on_batch_end = on_batch_end
 
-    def __iter__(self) -> Iterable[Tuple[dict, dict]]:
-        """Yields batches while updating tqdm display to display progress."""
-
+    def __iter__(self) -> Iterable[Tuple[dict, dict]]:  # noqa: C901
         samples_so_far = 0
         epoch_num = 0
         batch_num = 0
@@ -135,11 +105,11 @@ class EpochOrBatchIteratorWithProgress:
                     batch_size = len(batch["obs"])
                     assert batch_size > 0
                     samples_so_far += batch_size
-                    stats = dict(
-                        epoch_num=epoch_num,
-                        batch_num=batch_num,
-                        samples_so_far=samples_so_far,
-                    )
+                    stats = {
+                        "epoch_num": epoch_num,
+                        "batch_num": batch_num,
+                        "samples_so_far": samples_so_far,
+                    }
                     yield batch, stats
                     if self.on_batch_end is not None:
                         self.on_batch_end()
@@ -170,7 +140,6 @@ class EpochOrBatchIteratorWithProgress:
 
 
 class BC:
-
     DEFAULT_BATCH_SIZE: int = 32
     """
     Default batch size for DataLoader automatically constructed from
@@ -191,49 +160,27 @@ class BC:
         l2_weight: float = 0.0,
         device: Union[str, th.device] = "auto",
     ):
-        """Behavioral cloning (BC).
-        Recovers a policy via supervised learning on observation-action Tensor
-        pairs, sampled from a Torch DataLoader or any Iterator that ducktypes
-        `torch.utils.data.DataLoader`.
-        Args:
-            observation_space: the observation space of the environment.
-            action_space: the action space of the environment.
-            policy_class: used to instantiate imitation policy.
-            policy_kwargs: keyword arguments passed to policy's constructor.
-            expert_data: If not None, then immediately call
-                  `self.set_expert_data_loader(expert_data)` during
-                  initialization.
-            optimizer_cls: optimiser to use for supervised training.
-            optimizer_kwargs: keyword arguments, excluding learning rate and
-                  weight decay, for optimiser construction.
-            ent_weight: scaling applied to the policy's entropy regularization.
-            l2_weight: scaling applied to the policy's L2 regularization.
-            device: name/identity of device to place policy on.
-        """
-        if optimizer_kwargs:
+        if optimizer_kwargs:  # noqa: SIM102
             if "weight_decay" in optimizer_kwargs:
-                raise ValueError(
-                    "Use the parameter l2_weight instead of weight_decay.")
+                raise ValueError("Use the parameter l2_weight instead of weight_decay.")
 
         self.action_space = action_space
         self.observation_space = observation_space
         self.policy_class = policy_class
         self.device = device = utils.get_device(device)
-        self.policy_kwargs = dict(
-            observation_space=self.observation_space,
-            action_space=self.action_space,
-            lr_schedule=ConstantLRSchedule(),
-        )
+        self.policy_kwargs = {
+            "observation_space": self.observation_space,
+            "action_space": self.action_space,
+            "lr_schedule": ConstantLRSchedule(),
+        }
+
         self.policy_kwargs.update(policy_kwargs or {})
         self.device = utils.get_device(device)
 
-        self.policy = self.policy_class(**self.policy_kwargs).to(
-            self.device
-        )  # pytype: disable=not-instantiable
+        self.policy = self.policy_class(**self.policy_kwargs).to(self.device)  # pytype: disable=not-instantiable
         optimizer_kwargs = optimizer_kwargs or {}
 
-        self.optimizer = optimizer_cls(
-            self.policy.parameters(), **optimizer_kwargs)
+        self.optimizer = optimizer_cls(self.policy.parameters(), **optimizer_kwargs)
 
         self.expert_data_loader: Optional[Iterable[Mapping]] = None
         self.ent_weight = ent_weight
@@ -302,25 +249,25 @@ class BC:
         l2_loss = self.l2_weight * l2_norm
         loss = neglogp + ent_loss + l2_loss
 
-        stats_dict = dict(
-            neglogp=neglogp.item(),
-            loss=loss.item(),
-            entropy=entropy.item(),
-            ent_loss=ent_loss.item(),
-            prob_true_act=prob_true_act.item(),
-            l2_norm=l2_norm.item(),
-            l2_loss=l2_loss.item(),
-        )
+        stats_dict = {
+            "neglogp": neglogp.item(),
+            "loss": loss.item(),
+            "entropy": entropy.item(),
+            "ent_loss": ent_loss.item(),
+            "prob_true_act": prob_true_act.item(),
+            "l2_norm": l2_norm.item(),
+            "l2_loss": l2_loss.item(),
+        }
 
         return loss, stats_dict
 
     def train(
         self,
         *,
-        n_epochs: Optional[int] = None,
-        n_batches: Optional[int] = None,
-        on_epoch_end: Callable[[], None] = None,
-        on_batch_end: Callable[[], None] = None,
+        n_epochs: int | None = None,
+        n_batches: int | None = None,
+        on_epoch_end: Callable[[], None] | None = None,
+        on_batch_end: Callable[[], None] | None = None,
         log_interval: int = 100,
     ):
         """Train with supervised learning for some number of epochs.
@@ -347,9 +294,9 @@ class BC:
         )
 
         batch_num = 0
+        """
         for batch, stats_dict_it in it:
-            loss, stats_dict_loss = self._calculate_loss(
-                batch["obs"], batch["acts"])
+            loss, stats_dict_loss = self._calculate_loss(batch["obs"], batch["acts"])
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -361,10 +308,23 @@ class BC:
                         log.record(k, v)
                 log.dump(batch_num)
             batch_num += 1
+        """
+        for batch_num, (batch, stats_dict_it) in enumerate(it):
+            loss, stats_dict_loss = self._calculate_loss(batch["obs"], batch["acts"])
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            if batch_num % log_interval == 0:
+                for stats in [stats_dict_it, stats_dict_loss]:
+                    for k, v in stats.items():
+                        log.record(k, v)
+                log.dump(batch_num)
 
     def save_policy(self, policy_path: str) -> None:
         """Save policy to a path. Can be reloaded by `.reconstruct_policy()`.
         Args:
             policy_path: path to save policy to.
         """
-        th.save(self.policy, policy_path)
+        th.save(self.policy, policy_path)  # nosec B614
