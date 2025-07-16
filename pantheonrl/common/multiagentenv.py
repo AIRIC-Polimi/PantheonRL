@@ -172,7 +172,7 @@ class MultiAgentEnv(gym.Env, ABC):
 
             if done:
                 ego_obs = self._old_ego_obs
-                return self.ego_extractor(ego_obs), ego_rew, done, info
+                return self.ego_extractor(ego_obs), ego_rew, done, done, info
 
             if self.ego_ind in self._players:
                 break
