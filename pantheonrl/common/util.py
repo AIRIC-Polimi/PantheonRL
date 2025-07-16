@@ -3,7 +3,7 @@ from typing import Tuple, Union
 import gymnasium as gym
 import numpy as np
 import torch as th
-from gym.spaces import Box, Discrete, MultiBinary, MultiDiscrete, Space
+from gymnasium.spaces import Box, Discrete, MultiBinary, MultiDiscrete, Space
 from stable_baselines3.common import policies
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.utils import obs_as_tensor
