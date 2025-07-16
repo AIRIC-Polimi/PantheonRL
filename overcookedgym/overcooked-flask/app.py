@@ -5,7 +5,7 @@ import copy
 import argparse
 import torch
 import numpy as np
-import gym
+import gymnasium as gym
 
 from flask import Flask, jsonify, request
 from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld, OvercookedState, PlayerState, ObjectState

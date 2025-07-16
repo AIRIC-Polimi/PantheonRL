@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 from overcooked_ai_py.mdp.actions import Action
 from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld

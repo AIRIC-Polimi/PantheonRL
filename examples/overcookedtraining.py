@@ -5,7 +5,7 @@ To run this script, remember to first install overcooked
 via the instructions in the README.md
 """
 
-import gym
+import gymnasium as gym
 from stable_baselines3 import PPO
 
 from pantheonrl.common.agents import OnPolicyAgent

@@ -1,6 +1,6 @@
 from typing import Tuple, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch as th
 from gym.spaces import Box, Discrete, MultiBinary, MultiDiscrete, Space

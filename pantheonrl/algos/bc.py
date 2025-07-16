@@ -9,7 +9,7 @@ master/src/imitation/algorithms/bc.py
 import contextlib
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Type, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch as th
 import torch.utils.data as th_data

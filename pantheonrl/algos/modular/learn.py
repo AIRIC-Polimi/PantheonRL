@@ -2,10 +2,10 @@ import time
 import warnings
 from typing import Any, Dict, Optional, Type, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch as th
-from gym import spaces
+from gymnasium import spaces
 from stable_baselines3.common.buffers import DictRolloutBuffer, RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm

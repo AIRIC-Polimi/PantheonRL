@@ -1,21 +1,21 @@
 from typing import Dict, List, Optional, Tuple
 
-import gym
-import gymnasium
+#import gym
+import gymnasium as gym
 import numpy as np
 
 from pantheonrl.common.multiagentenv import DummyEnv, MultiAgentEnv
 from pantheonrl.common.observation import Observation
 
 
-def gymnasium_to_gym(space: gymnasium.spaces.Space) -> gym.Space:
-    if isinstance(space, gymnasium.spaces.box.Box):
+def gymnasium_to_gym(space: gym.spaces.Space) -> gym.Space:
+    if isinstance(space, gym.spaces.box.Box):
         return gym.spaces.Box(space.low, space.high, dtype=space.dtype)
-    if isinstance(space, gymnasium.spaces.discrete.Discrete):
+    if isinstance(space, gym.spaces.discrete.Discrete):
         return gym.spaces.Discrete(space.n)
-    if isinstance(space, gymnasium.spaces.multi_discrete.MultiDiscrete):
+    if isinstance(space, gym.spaces.multi_discrete.MultiDiscrete):
         return gym.spaces.MultiDiscrete(space.nvec)
-    if isinstance(space, gymnasium.spaces.multi_binary.MultiBinary):
+    if isinstance(space, gym.spaces.multi_binary.MultiBinary):
         return gym.spaces.MultiBinary(space.n)
 
     raise NotImplementedError(f"Space {space} not implemented yet for gymnasium to gym conversion")
@@ -33,7 +33,7 @@ class PettingZooAECWrapper(MultiAgentEnv):
         self.action_space = gymnasium_to_gym(base_env.action_space(ego_agent))
 
         obs_space = base_env.observation_space(ego_agent)
-        if isinstance(obs_space, gymnasium.spaces.dict.Dict):
+        if isinstance(obs_space, gym.spaces.dict.Dict):
             obs_space = obs_space.spaces["observation"]
         self.observation_space = gymnasium_to_gym(obs_space)
         self._action_mask = None
@@ -41,7 +41,7 @@ class PettingZooAECWrapper(MultiAgentEnv):
     def get_dummy_env(self, player_ind: int):  # it was getDummyEnv(self, player_ind: int):
         agent = self.base_env.possible_agents[player_ind]
         ospace = self.base_env.observation_space(agent)
-        if isinstance(ospace, gymnasium.spaces.dict.Dict):
+        if isinstance(ospace, gym.spaces.dict.Dict):
             ospace = ospace.spaces["observation"]
         ospace = gymnasium_to_gym(ospace)
         aspace = gymnasium_to_gym(self.base_env.action_space(agent))

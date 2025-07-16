@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
-import gym
+import gymnasium as gym
 import numpy as np
 
 from .multiagentenv import MultiAgentEnv, SimultaneousEnv, TurnBasedEnv

@@ -1,6 +1,6 @@
 import argparse
 import json
-import gym
+import gymnasium as gym
 
 import torch as th
 
