@@ -201,7 +201,7 @@ class MultiAgentEnv(gym.Env, ABC):
 
         assert ego_obs is not None
         self._old_ego_obs = ego_obs
-        return self.ego_extractor(ego_obs)
+        return self.ego_extractor(ego_obs), {k: {} for k in range(self.n_players)}
 
     @abstractmethod
     def n_step(
