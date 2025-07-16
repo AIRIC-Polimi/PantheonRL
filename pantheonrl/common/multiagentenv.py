@@ -179,7 +179,7 @@ class MultiAgentEnv(gym.Env, ABC):
 
         ego_obs = self._obs[self._players.index(self.ego_ind)]
         self._old_ego_obs = ego_obs
-        return self.ego_extractor(ego_obs), ego_rew, done, info
+        return self.ego_extractor(ego_obs), ego_rew, done, done, info
 
     def reset(self, seed: int | None = None) -> Union[Observation, Any]:
         self.resample_partner()
